@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -70,12 +71,14 @@ type actuator struct {
 // Reconcile the Extension resource.
 func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extensionsv1alpha1.Extension) error {
 	namespace := ex.GetNamespace()
+	a.logger.V(2).Info("Component is being reconciled", "component", "cert-management", "namespace", namespace)
 
 	cluster, err := controller.GetCluster(ctx, a.client, namespace)
 	if err != nil {
 		return err
 	}
 
+	a.logger.V(2).Info("Serializing ProviderConfig for extension resource", "namespace", namespace, "name", ex.GetName(), "providerConfig", ex.Spec.ProviderConfig)
 	certConfig := &service.CertConfig{}
 	if ex.Spec.ProviderConfig != nil {
 		if _, _, err := a.decoder.Decode(ex.Spec.ProviderConfig.Raw, nil, certConfig); err != nil {
@@ -84,6 +87,14 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 		if errs := validation.ValidateCertConfig(certConfig, cluster); len(errs) > 0 {
 			return errs.ToAggregate()
 		}
+	}
+
+	a.logger.V(2).Info("Decoded certConfig", "certConfig", certConfig)
+	certConfigJSON, err := json.Marshal(certConfig)
+	if err != nil {
+		a.logger.Error(err, "Failed to marshal certConfig")
+	} else {
+		a.logger.V(2).Info("Decoded certConfig", "certConfig", string(certConfigJSON))
 	}
 
 	if !controller.IsHibernated(cluster) {
@@ -95,6 +106,8 @@ func (a *actuator) Reconcile(ctx context.Context, log logr.Logger, ex *extension
 	if err := a.createSeedResources(ctx, certConfig, cluster, namespace); err != nil {
 		return err
 	}
+
+	a.logger.V(2).Info("Component is being reconciled", "component", "cert-management", "namespace", namespace)
 
 	return a.updateStatus(ctx, ex, certConfig)
 }
@@ -131,66 +144,128 @@ func (a *actuator) Migrate(ctx context.Context, log logr.Logger, ex *extensionsv
 }
 
 func (a *actuator) createIssuerValues(cluster *controller.Cluster, issuers ...service.IssuerConfig) ([]map[string]interface{}, error) {
-	issuerList := []map[string]interface{}{
-		{
-			"name": a.serviceConfig.IssuerName,
-			"acme": map[string]interface{}{
-				"email":      a.serviceConfig.ACME.Email,
-				"server":     a.serviceConfig.ACME.Server,
-				"privateKey": a.serviceConfig.ACME.PrivateKey,
-			},
-		},
-	}
+	a.logger.V(2).Info("Creating issuer values", "issuers", issuers, "amount", len(issuers))
+
+	issuerList := []map[string]interface{}{}
 
 	for _, issuer := range issuers {
 		if issuer.Name == a.serviceConfig.IssuerName {
+			a.logger.V(2).Info("Ignoring default issuer", "issuerName", issuer.Name)
 			continue
 		}
 
-		acme := map[string]interface{}{
-			"email":  issuer.Email,
-			"server": issuer.Server,
-		}
-		issuerValues := map[string]interface{}{
-			"name": issuer.Name,
-			"acme": acme,
-		}
-		if issuer.PrivateKeySecretName != nil {
-			secretName := a.lookupReferencedSecret(cluster, *issuer.PrivateKeySecretName)
-			acme["privateKeySecretName"] = secretName
-		}
-		if issuer.ExternalAccountBinding != nil {
-			secretName := a.lookupReferencedSecret(cluster, issuer.ExternalAccountBinding.KeySecretName)
-			acme["externalAccountBinding"] = map[string]interface{}{
-				"keyID":         issuer.ExternalAccountBinding.KeyID,
-				"keySecretName": secretName,
+		var issuerValues map[string]interface{}
+
+		if a.serviceConfig.ACME.Server != "" && a.serviceConfig.ACME.Email != "" && a.serviceConfig.CA.CACertificates == nil {
+			a.logger.Info("Configuring ACME issuer", "issuerName", issuer.Name)
+			acme := map[string]interface{}{}
+
+			if a.serviceConfig.ACME.Email != "" {
+				acme["email"] = a.serviceConfig.ACME.Email
 			}
-		}
-		if issuer.SkipDNSChallengeValidation != nil && *issuer.SkipDNSChallengeValidation {
-			acme["skipDNSChallengeValidation"] = true
-		}
-		if issuer.Domains != nil && len(issuer.Domains.Include)+len(issuer.Domains.Exclude) > 0 {
-			selection := map[string]interface{}{}
-			if issuer.Domains.Include != nil {
-				selection["include"] = issuer.Domains.Include
+			if a.serviceConfig.ACME.Server != "" {
+				acme["server"] = a.serviceConfig.ACME.Server
 			}
-			if issuer.Domains.Exclude != nil {
-				selection["exclude"] = issuer.Domains.Exclude
+			if a.serviceConfig.ACME.PrivateKey != nil {
+				acme["privateKey"] = *a.serviceConfig.ACME.PrivateKey
 			}
-			if len(selection) > 0 {
-				acme["domains"] = selection
+
+			issuerValues = map[string]interface{}{
+				"name": issuer.Name,
+				"acme": acme,
 			}
-		}
-		if issuer.RequestsPerDayQuota != nil {
-			issuerValues["requestsPerDayQuota"] = *issuer.RequestsPerDayQuota
-		}
-		if len(issuer.PrecheckNameservers) > 0 {
-			issuerValues["precheckNameservers"] = issuer.PrecheckNameservers
+
+			if issuer.PrivateKeySecretName != nil {
+				secretName := a.lookupReferencedSecret(cluster, *issuer.PrivateKeySecretName)
+				acme["privateKeySecretName"] = secretName
+			}
+			if issuer.ExternalAccountBinding != nil {
+				secretName := a.lookupReferencedSecret(cluster, issuer.ExternalAccountBinding.KeySecretName)
+				acme["externalAccountBinding"] = map[string]interface{}{
+					"keyID":         issuer.ExternalAccountBinding.KeyID,
+					"keySecretName": secretName,
+				}
+			}
+			if issuer.SkipDNSChallengeValidation != nil && *issuer.SkipDNSChallengeValidation {
+				acme["skipDNSChallengeValidation"] = true
+			}
+			if issuer.Domains != nil && len(issuer.Domains.Include)+len(issuer.Domains.Exclude) > 0 {
+				selection := map[string]interface{}{}
+				if issuer.Domains.Include != nil {
+					selection["include"] = issuer.Domains.Include
+				}
+				if issuer.Domains.Exclude != nil {
+					selection["exclude"] = issuer.Domains.Exclude
+				}
+				if len(selection) > 0 {
+					acme["domains"] = selection
+				}
+			}
+			if issuer.RequestsPerDayQuota != nil {
+				issuerValues["requestsPerDayQuota"] = *issuer.RequestsPerDayQuota
+			}
+			if len(issuer.PrecheckNameservers) > 0 {
+				issuerValues["precheckNameservers"] = issuer.PrecheckNameservers
+			}
+		} else if a.serviceConfig.CA.CACertificates != nil && a.serviceConfig.ACME.Email == "" && a.serviceConfig.ACME.Server == "" {
+			a.logger.Info("Configuring CA issuer", "issuerName", issuer.Name)
+			issuerValues = map[string]interface{}{
+				"name": issuer.Name,
+				"ca": map[string]interface{}{
+					"caCertificates": a.serviceConfig.CA.CACertificates,
+					"caPrivateKey":   a.serviceConfig.CA.CAPrivateKey,
+				},
+			}
 		}
 		issuerList = append(issuerList, issuerValues)
 	}
 
 	return issuerList, nil
+}
+
+func (a *actuator) createDefaultIssuerValues(cluster *controller.Cluster) (map[string]interface{}, error) {
+	a.logger.Info("Creating default issuer values")
+
+	var defaultIssuer map[string]interface{}
+
+	if a.serviceConfig.ACME.Server != "" && a.serviceConfig.ACME.Email != "" && a.serviceConfig.CA.CACertificates == nil {
+		a.logger.V(2).Info("Configuring ACME issuer", "issuerName", a.serviceConfig.IssuerName)
+		acme := map[string]interface{}{}
+
+		if a.serviceConfig.ACME.Email != "" {
+			acme["email"] = a.serviceConfig.ACME.Email
+		}
+		if a.serviceConfig.ACME.Server != "" {
+			acme["server"] = a.serviceConfig.ACME.Server
+		}
+		if a.serviceConfig.ACME.PrivateKey != nil {
+			acme["privateKey"] = *a.serviceConfig.ACME.PrivateKey
+		}
+
+		defaultIssuer = map[string]interface{}{
+			"name": a.serviceConfig.IssuerName,
+			"acme": acme,
+		}
+
+		defaultIssuer["requestsPerDayQuota"] = a.serviceConfig.DefaultRequestsPerDayQuota
+		if len(*a.serviceConfig.ACME.PrecheckNameservers) > 0 {
+			defaultIssuer["precheckNameservers"] = *a.serviceConfig.ACME.PrecheckNameservers
+		}
+	} else if a.serviceConfig.CA.CACertificates != nil && a.serviceConfig.ACME.Email == "" && a.serviceConfig.ACME.Server == "" {
+		a.logger.V(2).Info("Configuring CA issuer", "issuerName", a.serviceConfig.IssuerName)
+		defaultIssuer = map[string]interface{}{
+			"name": a.serviceConfig.IssuerName,
+			"ca": map[string]interface{}{
+				"caCertificates": a.serviceConfig.CA.CACertificates,
+				"caPrivateKey":   a.serviceConfig.CA.CAPrivateKey,
+			},
+		}
+	}
+
+	a.logger.Info("Created default issuer", "issuerName", a.serviceConfig.IssuerName)
+	a.logger.V(2).Info("issuerValues", defaultIssuer)
+
+	return defaultIssuer, nil
 }
 
 func (a *actuator) lookupReferencedSecret(cluster *controller.Cluster, refname string) string {
@@ -233,9 +308,30 @@ func createDNSChallengeOnShootValues(cfg *service.DNSChallengeOnShoot) (map[stri
 }
 
 func (a *actuator) createSeedResources(ctx context.Context, certConfig *service.CertConfig, cluster *controller.Cluster, namespace string) error {
+	a.logger.Info("Creating seed resources", "namespace", namespace)
+
+	certConfigJSON, err := json.Marshal(certConfig)
+	if err != nil {
+		a.logger.Error(err, "Failed to marshal certConfig")
+	} else {
+		a.logger.V(2).Info("Decoded certConfig", "certConfig", string(certConfigJSON))
+	}
+
+	a.logger.Info("Creating issuer values")
 	issuers, err := a.createIssuerValues(cluster, certConfig.Issuers...)
 	if err != nil {
 		return err
+	}
+	a.logger.V(2).Info("Created issuer values", "issuers", issuers)
+
+	if len(issuers) == 0 {
+		a.logger.Info("Creating default issuer values")
+		defaultIssuer, err := a.createDefaultIssuerValues(cluster)
+		if err != nil {
+			return err
+		}
+		issuers = append(issuers, defaultIssuer)
+		a.logger.V(2).Info("Created default issuer values", "defaultIssuer", defaultIssuer)
 	}
 
 	dnsChallengeOnShoot, err := createDNSChallengeOnShootValues(certConfig.DNSChallengeOnShoot)
@@ -249,9 +345,11 @@ func (a *actuator) createSeedResources(ctx context.Context, certConfig *service.
 	}
 
 	var propagationTimeout string
-	if a.serviceConfig.ACME.PropagationTimeout != nil {
+	if a.serviceConfig.ACME.Email != "" && a.serviceConfig.ACME.Server != "" && a.serviceConfig.ACME.PropagationTimeout != nil {
 		propagationTimeout = a.serviceConfig.ACME.PropagationTimeout.Duration.String()
 	}
+
+	a.logger.V(2).Info("Adding Issuers to seed", "issuers count", len(issuers))
 
 	var (
 		shootIssuers         = a.createShootIssuersValues(certConfig)
@@ -282,39 +380,41 @@ func (a *actuator) createSeedResources(ctx context.Context, certConfig *service.
 		cfg["defaultRequestsPerDayQuota"] = *a.serviceConfig.DefaultRequestsPerDayQuota
 	}
 
-	if a.serviceConfig.ACME.PrecheckNameservers != nil {
-		cfg["precheckNameservers"] = *a.serviceConfig.ACME.PrecheckNameservers
-	}
-	if certConfig.PrecheckNameservers != nil {
-		servers := *certConfig.PrecheckNameservers
+	if a.serviceConfig.ACME.Email != "" && a.serviceConfig.ACME.Server != "" {
 		if a.serviceConfig.ACME.PrecheckNameservers != nil {
-			servers = mergeServers(servers, *a.serviceConfig.ACME.PrecheckNameservers)
+			cfg["precheckNameservers"] = *a.serviceConfig.ACME.PrecheckNameservers
 		}
-		cfg["precheckNameservers"] = servers
-	}
-	if a.serviceConfig.ACME.CACertificates != nil {
-		cfg["caCertificates"] = *a.serviceConfig.ACME.CACertificates
-	}
-	if a.serviceConfig.ACME.DeactivateAuthorizations != nil {
-		cfg["deactivateAuthorizations"] = *a.serviceConfig.ACME.DeactivateAuthorizations
-	}
+		if certConfig.PrecheckNameservers != nil {
+			servers := *certConfig.PrecheckNameservers
+			if a.serviceConfig.ACME.PrecheckNameservers != nil {
+				servers = mergeServers(servers, *a.serviceConfig.ACME.PrecheckNameservers)
+			}
+			cfg["precheckNameservers"] = servers
+		}
+		if a.serviceConfig.ACME.CACertificates != nil {
+			cfg["caCertificates"] = *a.serviceConfig.ACME.CACertificates
+		}
+		if a.serviceConfig.ACME.DeactivateAuthorizations != nil {
+			cfg["deactivateAuthorizations"] = *a.serviceConfig.ACME.DeactivateAuthorizations
+		}
 
-	if certConfig.Alerting != nil && certConfig.Alerting.CertExpirationAlertDays != nil {
-		cfg["certExpirationAlertDays"] = *certConfig.Alerting.CertExpirationAlertDays
-	}
+		if certConfig.Alerting != nil && certConfig.Alerting.CertExpirationAlertDays != nil {
+			cfg["certExpirationAlertDays"] = *certConfig.Alerting.CertExpirationAlertDays
+		}
 
-	if a.serviceConfig.PrivateKeyDefaults != nil {
-		defaults := map[string]interface{}{}
-		if a.serviceConfig.PrivateKeyDefaults.Algorithm != nil {
-			defaults["algorithm"] = *a.serviceConfig.PrivateKeyDefaults.Algorithm
+		if a.serviceConfig.PrivateKeyDefaults != nil {
+			defaults := map[string]interface{}{}
+			if a.serviceConfig.PrivateKeyDefaults.Algorithm != nil {
+				defaults["algorithm"] = *a.serviceConfig.PrivateKeyDefaults.Algorithm
+			}
+			if a.serviceConfig.PrivateKeyDefaults.SizeRSA != nil {
+				defaults["sizeRSA"] = *a.serviceConfig.PrivateKeyDefaults.SizeRSA
+			}
+			if a.serviceConfig.PrivateKeyDefaults.SizeECDSA != nil {
+				defaults["sizeECDSA"] = *a.serviceConfig.PrivateKeyDefaults.SizeECDSA
+			}
+			cfg["privateKeyDefaults"] = defaults
 		}
-		if a.serviceConfig.PrivateKeyDefaults.SizeRSA != nil {
-			defaults["sizeRSA"] = *a.serviceConfig.PrivateKeyDefaults.SizeRSA
-		}
-		if a.serviceConfig.PrivateKeyDefaults.SizeECDSA != nil {
-			defaults["sizeECDSA"] = *a.serviceConfig.PrivateKeyDefaults.SizeECDSA
-		}
-		cfg["privateKeyDefaults"] = defaults
 	}
 
 	// TODO(rfranzke): Delete this after August 2024.
@@ -337,11 +437,14 @@ func (a *actuator) createSeedResources(ctx context.Context, certConfig *service.
 	}
 
 	a.logger.Info("Component is being applied", "component", "cert-management", "namespace", namespace)
+	a.logger.V(2).Info("Service Configuration", "config", a.serviceConfig)
+	a.logger.V(2).Info("Cert Management Config Values", "values", certManagementConfig)
 
 	return a.createManagedResource(ctx, namespace, v1alpha1.CertManagementResourceNameSeed, "seed", renderer, v1alpha1.CertManagementChartNameSeed, namespace, certManagementConfig, nil)
 }
 
 func (a *actuator) createShootResources(ctx context.Context, certConfig *service.CertConfig, cluster *controller.Cluster, namespace string) error {
+	a.logger.Info("Creating shoot resources", "namespace", namespace)
 	dnsChallengeOnShoot, err := createDNSChallengeOnShootValues(certConfig.DNSChallengeOnShoot)
 	if err != nil {
 		return err
@@ -392,10 +495,15 @@ func (a *actuator) deleteShootResources(ctx context.Context, namespace string) e
 
 func (a *actuator) createManagedResource(ctx context.Context, namespace, name, class string, renderer chartrenderer.Interface, chartName, chartNamespace string, chartValues map[string]interface{}, injectedLabels map[string]string) error {
 	chartPath := filepath.Join(charts.ChartsPath, chartName)
+	a.logger.V(2).Info("Rendering chart", "chartPath", chartPath, "chartName", chartName, "chartNamespace", chartNamespace, "chartValues", chartValues)
 	chart, err := renderer.RenderEmbeddedFS(charts.Internal, chartPath, chartName, chartNamespace, chartValues)
 	if err != nil {
 		return err
 	}
+
+	a.logger.Info("Creating managed resource", "namespace", namespace, "name", name)
+	a.logger.V(2).Info("Chart manifest", "manifest", string(chart.Manifest()))
+	a.logger.V(2).Info("Chart values", "values", chartValues)
 
 	data := map[string][]byte{chartName: chart.Manifest()}
 	keepObjects := false
@@ -423,6 +531,7 @@ func (a *actuator) updateStatus(ctx context.Context, ex *extensionsv1alpha1.Exte
 }
 
 func (a *actuator) createShootIssuersValues(certConfig *service.CertConfig) map[string]interface{} {
+	a.logger.V(2).Info("Creating shoot issuers values", "certConfig", certConfig)
 	shootIssuersEnabled := false
 	if certConfig.ShootIssuers != nil {
 		shootIssuersEnabled = certConfig.ShootIssuers.Enabled

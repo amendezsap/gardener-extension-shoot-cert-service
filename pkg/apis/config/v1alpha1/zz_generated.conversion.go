@@ -37,6 +37,16 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddGeneratedConversionFunc((*CA)(nil), (*config.CA)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_CA_To_config_CA(a.(*CA), b.(*config.CA), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*config.CA)(nil), (*CA)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_config_CA_To_v1alpha1_CA(a.(*config.CA), b.(*CA), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddGeneratedConversionFunc((*Configuration)(nil), (*config.Configuration)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha1_Configuration_To_config_Configuration(a.(*Configuration), b.(*config.Configuration), scope)
 	}); err != nil {
@@ -102,12 +112,35 @@ func Convert_config_ACME_To_v1alpha1_ACME(in *config.ACME, out *ACME, s conversi
 	return autoConvert_config_ACME_To_v1alpha1_ACME(in, out, s)
 }
 
+func autoConvert_v1alpha1_CA_To_config_CA(in *CA, out *config.CA, s conversion.Scope) error {
+	out.CACertificates = (*string)(unsafe.Pointer(in.CACertificates))
+	out.CAPrivateKey = (*string)(unsafe.Pointer(in.CAPrivateKey))
+	return nil
+}
+
+func Convert_v1alpha1_CA_To_config_CA(in *CA, out *config.CA, s conversion.Scope) error {
+	return autoConvert_v1alpha1_CA_To_config_CA(in, out, s)
+}
+
+func autoConvert_config_CA_To_v1alpha1_CA(in *config.CA, out *CA, s conversion.Scope) error {
+	out.CACertificates = (*string)(unsafe.Pointer(in.CACertificates))
+	out.CAPrivateKey = (*string)(unsafe.Pointer(in.CAPrivateKey))
+	return nil
+}
+
+func Convert_config_CA_To_v1alpha1_CA(in *config.CA, out *CA, s conversion.Scope) error {
+	return autoConvert_config_CA_To_v1alpha1_CA(in, out, s)
+}
+
 func autoConvert_v1alpha1_Configuration_To_config_Configuration(in *Configuration, out *config.Configuration, s conversion.Scope) error {
 	out.IssuerName = in.IssuerName
 	out.RestrictIssuer = (*bool)(unsafe.Pointer(in.RestrictIssuer))
 	out.DefaultRequestsPerDayQuota = (*int32)(unsafe.Pointer(in.DefaultRequestsPerDayQuota))
 	out.ShootIssuers = (*config.ShootIssuers)(unsafe.Pointer(in.ShootIssuers))
 	if err := Convert_v1alpha1_ACME_To_config_ACME(&in.ACME, &out.ACME, s); err != nil {
+		return err
+	}
+	if err := Convert_v1alpha1_CA_To_config_CA(&in.CA, &out.CA, s); err != nil {
 		return err
 	}
 	out.HealthCheckConfig = (*apisconfig.HealthCheckConfig)(unsafe.Pointer(in.HealthCheckConfig))
@@ -126,6 +159,9 @@ func autoConvert_config_Configuration_To_v1alpha1_Configuration(in *config.Confi
 	out.DefaultRequestsPerDayQuota = (*int32)(unsafe.Pointer(in.DefaultRequestsPerDayQuota))
 	out.ShootIssuers = (*ShootIssuers)(unsafe.Pointer(in.ShootIssuers))
 	if err := Convert_config_ACME_To_v1alpha1_ACME(&in.ACME, &out.ACME, s); err != nil {
+		return err
+	}
+	if err := Convert_config_CA_To_v1alpha1_CA(&in.CA, &out.CA, s); err != nil {
 		return err
 	}
 	out.HealthCheckConfig = (*configv1alpha1.HealthCheckConfig)(unsafe.Pointer(in.HealthCheckConfig))

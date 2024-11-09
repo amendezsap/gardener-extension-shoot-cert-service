@@ -44,6 +44,10 @@ type IssuerConfig struct {
 	Name   string
 	Server string
 	Email  string
+
+	//CA is the CA configuration for the issuer.
+	CACertificates *CA
+
 	// RequestsPerDayQuota sets quota for certificate requests per day
 	RequestsPerDayQuota *int
 
@@ -98,4 +102,10 @@ type ACMEExternalAccountBinding struct {
 // If specified, it overwrites the ShootIssuers settings of the service configuration.
 type ShootIssuers struct {
 	Enabled bool
+}
+
+type CA struct {
+	// CACertificates is a PEM encoded CA certificate chain used for verifying the ACME server
+	CACertificates *string
+	CAPrivateKey   *string
 }
