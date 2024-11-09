@@ -69,8 +69,11 @@ type Alerting struct {
 // IssuerConfig contains information for certificate issuers.
 type IssuerConfig struct {
 	Name   string `json:"name"`
-	Server string `json:"server"`
-	Email  string `json:"email"`
+	Server string `json:"server,omitempty"`
+	Email  string `json:"email,omitempty"`
+	// CACertificates is a PEM encoded CA certificate chain used for verifying the ACME server.
+	// +optional
+	CACertificates *CA `json:"caCertificates,omitempty"`
 	// RequestsPerDayQuota sets quota for certificate requests per day
 	// +optional
 	RequestsPerDayQuota *int `json:"requestsPerDayQuota,omitempty"`
@@ -134,4 +137,10 @@ type ACMEExternalAccountBinding struct {
 // If specified, it overwrites the ShootIssuers settings of the service configuration.
 type ShootIssuers struct {
 	Enabled bool `json:"enabled"`
+}
+
+type CA struct {
+	// CACertificates is a PEM encoded CA certificate chain used for verifying the ACME server
+	CACertificates *string `json:"caCertificates"`
+	CAPrivateKey   *string `json:"caPrivateKey"`
 }

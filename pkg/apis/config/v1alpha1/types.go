@@ -28,7 +28,11 @@ type Configuration struct {
 	// +optional
 	ShootIssuers *ShootIssuers `json:"shootIssuers,omitempty"`
 	// ACME contains ACME related configuration.
-	ACME ACME `json:"acme"`
+	// +optional
+	ACME ACME `json:"acme,omitempty"`
+	// CA contains CA related configuration.
+	// +optional
+	CA CA `json:"ca,omitempty"`
 	// HealthCheckConfig is the config for the health check controller.
 	// +optional
 	HealthCheckConfig *configv1alpha1.HealthCheckConfig `json:"healthCheckConfig,omitempty"`
@@ -77,4 +81,12 @@ type ACME struct {
 	// DeactivateAuthorizations enables deactivation of authorizations after successful certificate request
 	// +optional
 	DeactivateAuthorizations *bool `json:"deactivateAuthorizations,omitempty"`
+}
+
+// CA holds information about the CA issuer used for the certificate service.
+type CA struct {
+	// CACertificates is the certificate data for the CA issuer.
+	CACertificates *string `json:"caCertificates"`
+	// CAPrivateKey is the private key data for the CA issuer.
+	CAPrivateKey *string `json:"caPrivateKey"`
 }
