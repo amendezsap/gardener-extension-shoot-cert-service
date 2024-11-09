@@ -21,3 +21,5 @@
 
 !VERSION
 !Makefile
+!.git
+!.dockerignore

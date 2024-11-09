@@ -27,7 +27,7 @@ var _ = Describe("Validation", func() {
 			err := validation.ValidateConfiguration(&config)
 			Expect(err).To(match)
 		},
-		Entry("Empty configuration", config.Configuration{
+		Entry("Empty configuration with ACME provided but invalid", config.Configuration{
 			IssuerName: "",
 			ACME:       config.ACME{},
 		}, ConsistOf(
@@ -140,6 +140,40 @@ AAABBBCCCDDD
 				"Type":   Equal(field.ErrorTypeInvalid),
 				"Field":  Equal("privateKeyDefaults.sizeECDSA"),
 				"Detail": Equal("size for ECDSA algorithm must either be '256' or '384'"),
+			})),
+		)),
+		Entry("Valid CA configuration", config.Configuration{
+			IssuerName: "gardener",
+			CA: config.CA{
+				CACertificates: ptr.To(`
+-----BEGIN CERTIFICATE-----
+MIID...YourValidCACertificateHere...==
+-----END CERTIFICATE-----
+`),
+			},
+		}, BeEmpty()),
+
+		// Test case for a configuration with CA provided but invalid (malformed certificate)
+		Entry("Invalid CA configuration with malformed certificates", config.Configuration{
+			IssuerName: "gardener",
+			CA: config.CA{
+				CACertificates: ptr.To("invalid-certificates"),
+			},
+		}, ConsistOf(
+			PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeInvalid),
+				"Field": Equal("ca.caCertificates"),
+			})),
+		)),
+
+		// Test case for a configuration with CA provided but missing required fields
+		Entry("Empty configuration with CA provided but invalid", config.Configuration{
+			IssuerName: "gardener",
+			CA:         config.CA{}, // CA is provided but empty
+		}, ConsistOf(
+			PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeRequired),
+				"Field": Equal("ca.caCertificates"),
 			})),
 		)),
 	)

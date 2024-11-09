@@ -25,6 +25,8 @@ type Configuration struct {
 	ShootIssuers *ShootIssuers
 	// ACME contains ACME related configuration.
 	ACME ACME
+	// CA contains CA related configuration.
+	CA CA
 	// HealthCheckConfig is the config for the health check controller.
 	HealthCheckConfig *apisconfig.HealthCheckConfig
 	// PrivateKeyDefaults default algorithm and sizes for certificate private keys.
@@ -63,4 +65,11 @@ type ACME struct {
 	CACertificates *string
 	// DeactivateAuthorizations enables deactivation of authorizations after successful certificate request
 	DeactivateAuthorizations *bool
+}
+
+// CA holds information about the CA issuer used for the certificate service.
+type CA struct {
+	// CACertificates are custom root certificates to be made available for the cert-controller-manager
+	CACertificates *string
+	CAPrivateKey   *string
 }
