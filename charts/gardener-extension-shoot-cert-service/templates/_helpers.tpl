@@ -27,6 +27,7 @@ privateKeyDefaults:
   sizeECDSA: {{ .Values.certificateConfig.privateKeyDefaults.sizeECDSA }}
 {{- end }}
 {{- end }}
+{{- if and .Values.certificateConfig.defaultIssuer.acme (not .Values.certificateConfig.defaultIssuer.ca) }}
 acme:
   email: {{ required ".Values.certificateConfig.defaultIssuer.acme.email is required" .Values.certificateConfig.defaultIssuer.acme.email }}
   server: {{ required ".Values.certificateConfig.defaultIssuer.acme.server is required" .Values.certificateConfig.defaultIssuer.acme.server }}
@@ -46,6 +47,14 @@ acme:
   {{- if .Values.certificateConfig.deactivateAuthorizations }}
   deactivateAuthorizations: true
   {{- end }}
+{{- end }}
+{{- if .Values.certificateConfig.defaultIssuer.ca }}
+ca:
+  caCertificates: |
+{{ required ".Values.certificateConfig.defaultIssuer.ca.caCertificates is required" .Values.certificateConfig.defaultIssuer.ca.caCertificates | trim | indent 4 }}
+  caPrivateKey: |
+{{ required ".Values.certificateConfig.defaultIssuer.ca.caPrivateKey is required" .Values.certificateConfig.defaultIssuer.ca.caPrivateKey | trim | indent 4 }}
+{{- end }}
 {{- end }}
 
 {{-  define "image" -}}

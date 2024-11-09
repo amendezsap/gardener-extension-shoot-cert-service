@@ -30,6 +30,8 @@ func ValidateConfiguration(config *config.Configuration) field.ErrorList {
 
 	allErrs = append(allErrs, validateACME(&config.ACME, field.NewPath("acme"))...)
 
+	allErrs = append(allErrs, validateCA(&config.CA, field.NewPath("ca"))...)
+
 	allErrs = append(allErrs, validatePrivateKeyDefaults(config.PrivateKeyDefaults, field.NewPath("privateKeyDefaults"))...)
 
 	return allErrs
@@ -38,12 +40,21 @@ func ValidateConfiguration(config *config.Configuration) field.ErrorList {
 func validateACME(acme *config.ACME, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
-	if _, err := url.ParseRequestURI(acme.Server); err != nil {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("server"), acme.Server, err.Error()))
+	if acme == nil {
+		// ACME is optional; no validation needed if it's not provided
+		return allErrs
 	}
 
-	if !utils.TestEmail(acme.Email) {
-		allErrs = append(allErrs, field.Invalid(fldPath.Child("email"), acme.Email, "must be a valid mail address"))
+	if &acme.Server != nil && acme.Server != "" {
+		if _, err := url.ParseRequestURI(acme.Server); err != nil {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("server"), acme.Server, "must be a valid URL"))
+		}
+	}
+
+	if &acme.Email != nil && acme.Email != "" {
+		if !utils.TestEmail(acme.Email) {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("email"), acme.Email, "must be a valid email address"))
+		}
 	}
 
 	if acme.PrecheckNameservers != nil {
@@ -69,6 +80,35 @@ func validateACME(acme *config.ACME, fldPath *field.Path) field.ErrorList {
 			allErrs = append(allErrs, field.Invalid(fldPath.Child("caCertificates"), short, "invalid certificate(s), expected PEM format)"))
 		}
 	}
+	return allErrs
+}
+
+func validateCA(ca *config.CA, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if ca == nil {
+		// CA is optional; no validation needed if it's not provided
+		return allErrs
+	}
+
+	s := strings.TrimSpace(*ca.CACertificates)
+	if !strings.HasPrefix(s, "-----BEGIN CERTIFICATE-----") || !strings.HasSuffix(s, "-----END CERTIFICATE-----") {
+		short := s
+		if len(short) > 60 {
+			short = s[:30] + "..." + s[len(s)-30:]
+		}
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("caCertificates"), short, "invalid certificate(s), expected PEM format)"))
+	}
+
+	s = strings.TrimSpace(*ca.CAPrivateKey)
+	if !strings.HasPrefix(s, "-----BEGIN PRIVATE KEY-----") || !strings.HasSuffix(s, "-----END PRIVATE KEY-----") {
+		short := s
+		if len(short) > 60 {
+			short = s[:30] + "..." + s[len(s)-30:]
+		}
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("caPrivateKey"), short, "invalid private key, expected PEM format)"))
+	}
+
 	return allErrs
 }
 
